@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { auth, googleProvider, db } from "./firebase";
 import {
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   onAuthStateChanged,
   signOut,
+  browserLocalPersistence,
+  setPersistence,
 } from "firebase/auth";
 import {
   collection,
@@ -376,13 +376,6 @@ export default function InvestmentWatchlist() {
     return unsubscribe;
   }, []);
 
-  // リダイレクト結果の処理（スマホ用）
-  useEffect(() => {
-    getRedirectResult(auth).catch((err) => {
-      console.error("リダイレクトログインエラー:", err);
-    });
-  }, []);
-
   // Firestore リアルタイム同期
   useEffect(() => {
     if (!user) {
@@ -400,23 +393,16 @@ export default function InvestmentWatchlist() {
     return unsubscribe;
   }, [user]);
 
-  // ログイン
+  // ログイン（ポップアップ方式に統一）
   const handleLogin = async () => {
     setLoginLoading(true);
     try {
-      // モバイルではリダイレクト、PCではポップアップ
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      if (isMobile) {
-        await signInWithRedirect(auth, googleProvider);
-      } else {
-        await signInWithPopup(auth, googleProvider);
-      }
+      // ログイン状態をブラウザに永続化する設定
+      await setPersistence(auth, browserLocalPersistence);
+      await signInWithPopup(auth, googleProvider);
     } catch (err) {
       console.error("ログインエラー:", err);
-      // ポップアップがブロックされた場合、リダイレクトにフォールバック
-      if (err.code === "auth/popup-blocked") {
-        await signInWithRedirect(auth, googleProvider);
-      }
+      alert("ログインに失敗しました。ポップアップを許可してもう一度お試しください。");
     } finally {
       setLoginLoading(false);
     }
