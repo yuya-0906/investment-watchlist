@@ -2,14 +2,16 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
+// 環境変数からFirebase設定を読み込む（.envファイル）
+// Viteでは import.meta.env.VITE_xxx でアクセスできる
 const firebaseConfig = {
-    apiKey: "AIzaSyCUH5wnxhj5iXioRZPkpxiI6pH-HMcg2Z0",
-    authDomain: "investment-watchlist-fe3f1.firebaseapp.com",
-    projectId: "investment-watchlist-fe3f1",
-    storageBucket: "investment-watchlist-fe3f1.firebasestorage.app",
-    messagingSenderId: "471653928487",
-    appId: "1:471653928487:web:193b921e0e6eb60e498802",
-    measurementId: "G-DY2QBH59N2",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const app = initializeApp(firebaseConfig);
