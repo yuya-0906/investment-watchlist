@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { auth, googleProvider, db } from "./firebase";
 import {
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   onAuthStateChanged,
   signOut,
   browserLocalPersistence,
@@ -312,10 +314,11 @@ function StockForm({ stock, onSave, onCancel }) {
                 key={p.value}
                 type="button"
                 onClick={() => update("priority", p.value)}
-                className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${form.priority === p.value
+                className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${
+                  form.priority === p.value
                     ? `${p.color} text-white shadow-md scale-105`
                     : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                  }`}
+                }`}
               >
                 {p.label}
               </button>
@@ -367,6 +370,10 @@ export default function InvestmentWatchlist() {
   const [notifications, setNotifications] = useState([]);
   const [sortBy, setSortBy] = useState("date");
 
+  // PWAスタンドアロンモードかどうか判定
+  const isPWA = window.matchMedia("(display-mode: standalone)").matches
+    || window.navigator.standalone === true;
+
   // 認証状態の監視
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -375,6 +382,15 @@ export default function InvestmentWatchlist() {
     });
     return unsubscribe;
   }, []);
+
+  // PWAモードでリダイレクトから戻ってきた時の処理
+  useEffect(() => {
+    if (isPWA) {
+      getRedirectResult(auth).catch((err) => {
+        console.error("リダイレクトログインエラー:", err);
+      });
+    }
+  }, [isPWA]);
 
   // Firestore リアルタイム同期
   useEffect(() => {
@@ -393,16 +409,25 @@ export default function InvestmentWatchlist() {
     return unsubscribe;
   }, [user]);
 
-  // ログイン（ポップアップ方式に統一）
+  // ログイン（PWAならリダイレクト、通常ブラウザならポップアップ）
   const handleLogin = async () => {
     setLoginLoading(true);
     try {
-      // ログイン状態をブラウザに永続化する設定
       await setPersistence(auth, browserLocalPersistence);
-      await signInWithPopup(auth, googleProvider);
+      if (isPWA) {
+        // PWAモードではポップアップが開けないのでリダイレクト
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
     } catch (err) {
       console.error("ログインエラー:", err);
-      alert("ログインに失敗しました。ポップアップを許可してもう一度お試しください。");
+      // ポップアップがブロックされた場合もリダイレクトにフォールバック
+      if (err.code === "auth/popup-blocked") {
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        alert("ログインに失敗しました。もう一度お試しください。");
+      }
     } finally {
       setLoginLoading(false);
     }
@@ -593,10 +618,11 @@ export default function InvestmentWatchlist() {
                 <button
                   key={f.value}
                   onClick={() => setFilter(f.value)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filter === f.value
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    filter === f.value
                       ? "bg-gray-800 text-white"
                       : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                    }`}
+                  }`}
                 >
                   {f.label}
                 </button>
