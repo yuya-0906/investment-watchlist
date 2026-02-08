@@ -389,6 +389,8 @@ export default function InvestmentWatchlist() {
   const [sortBy, setSortBy] = useState("date");
 
   const [loginError, setLoginError] = useState(false);
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [lastPriceUpdate, setLastPriceUpdate] = useState(null);
 
   // 認証状態の監視
   useEffect(() => {
@@ -492,6 +494,46 @@ export default function InvestmentWatchlist() {
     setShowForm(true);
   };
 
+  // 株価を一括取得してFirestoreに保存
+  const handleFetchPrices = async () => {
+    // 証券コードがある銘柄だけ対象
+    const stocksWithCode = stocks.filter((s) => s.code);
+    if (stocksWithCode.length === 0) {
+      alert("証券コードが設定された銘柄がありません");
+      return;
+    }
+
+    setPriceLoading(true);
+    try {
+      const codes = stocksWithCode.map((s) => s.code).join(",");
+      const res = await fetch(`/api/stock-price?codes=${codes}`);
+      const json = await res.json();
+
+      if (!json.success) {
+        alert("株価の取得に失敗しました");
+        return;
+      }
+
+      // 取得した株価でFirestoreを更新
+      for (const stock of stocksWithCode) {
+        const priceData = json.data[stock.code];
+        if (priceData && priceData.price) {
+          await saveStock({
+            ...stock,
+            currentPrice: priceData.price,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+      setLastPriceUpdate(new Date().toLocaleTimeString("ja-JP"));
+    } catch (err) {
+      console.error("株価取得エラー:", err);
+      alert("株価の取得に失敗しました。しばらくしてからお試しください。");
+    } finally {
+      setPriceLoading(false);
+    }
+  };
+
   const dismissNotification = (id) => setNotifications((n) => n.filter((x) => x.id !== id));
   const dismissAllNotifications = () => setNotifications([]);
 
@@ -563,6 +605,11 @@ export default function InvestmentWatchlist() {
                     🔔 {buyableCount}件が買い時！
                   </span>
                 )}
+                {lastPriceUpdate && (
+                  <span className="text-gray-300 ml-2">
+                    (株価: {lastPriceUpdate}更新)
+                  </span>
+                )}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -583,6 +630,13 @@ export default function InvestmentWatchlist() {
                   ログアウト
                 </button>
               </div>
+              <button
+                onClick={handleFetchPrices}
+                disabled={priceLoading}
+                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-50 text-sm"
+              >
+                {priceLoading ? "取得中..." : "株価更新"}
+              </button>
               <button
                 onClick={() => {
                   setEditingStock(null);
