@@ -37,10 +37,38 @@ const getPriorityColor = (priority) => {
 const getPriorityLabel = (p) => ({ high: "高", medium: "中", low: "低" }[p] || "中");
 
 // ========== ログイン画面 ==========
-function LoginScreen({ onLogin, loading, loginError }) {
+function LoginScreen({ onLogin, loading }) {
   // PWAスタンドアロンモードかどうか
   const isPWA = window.matchMedia("(display-mode: standalone)").matches
     || window.navigator.standalone === true;
+
+  // PWAモードの場合はSafariで開くよう案内
+  if (isPWA) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-sm w-full text-center">
+          <p className="text-6xl mb-4">📈</p>
+          <h1 className="text-2xl font-black text-gray-800 mb-2">投資ウォッチリスト</h1>
+          <p className="text-gray-500 text-sm mb-6">
+            初回ログインはブラウザから行う必要があります
+          </p>
+          <button
+            onClick={() => {
+              // SafariでURLを開く
+              const url = window.location.href;
+              window.open(url, "_blank");
+            }}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-all"
+          >
+            Safariでログインする
+          </button>
+          <p className="text-xs text-gray-400 mt-4">
+            ブラウザでログイン後、そのままブラウザ版をお使いください
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
@@ -63,22 +91,6 @@ function LoginScreen({ onLogin, loading, loginError }) {
           </svg>
           {loading ? "ログイン中..." : "Googleでログイン"}
         </button>
-        {loginError && isPWA && (
-          <div className="mt-6 p-4 bg-amber-50 rounded-xl text-left">
-            <p className="text-sm text-amber-800 font-bold mb-2">
-              ホーム画面アプリではログインできない場合があります
-            </p>
-            <p className="text-xs text-amber-600 mb-3">
-              Safariで一度ログインすれば、次回からホーム画面アプリでも自動ログインされます。
-            </p>
-            <button
-              onClick={() => window.open(window.location.href, "_blank")}
-              className="w-full py-2 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-600 transition-colors"
-            >
-              Safariで開く
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -579,7 +591,7 @@ export default function InvestmentWatchlist() {
 
   // 未ログイン
   if (!user) {
-    return <LoginScreen onLogin={handleLogin} loading={loginLoading} loginError={loginError} />;
+    return <LoginScreen onLogin={handleLogin} loading={loginLoading} />;
   }
 
   return (
