@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { auth, googleProvider, db } from "./firebase";
 import {
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   onAuthStateChanged,
   signOut,
   browserLocalPersistence,
@@ -39,7 +37,11 @@ const getPriorityColor = (priority) => {
 const getPriorityLabel = (p) => ({ high: "高", medium: "中", low: "低" }[p] || "中");
 
 // ========== ログイン画面 ==========
-function LoginScreen({ onLogin, loading }) {
+function LoginScreen({ onLogin, loading, loginError }) {
+  // PWAスタンドアロンモードかどうか
+  const isPWA = window.matchMedia("(display-mode: standalone)").matches
+    || window.navigator.standalone === true;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl shadow-xl p-8 max-w-sm w-full text-center">
@@ -61,6 +63,22 @@ function LoginScreen({ onLogin, loading }) {
           </svg>
           {loading ? "ログイン中..." : "Googleでログイン"}
         </button>
+        {loginError && isPWA && (
+          <div className="mt-6 p-4 bg-amber-50 rounded-xl text-left">
+            <p className="text-sm text-amber-800 font-bold mb-2">
+              ホーム画面アプリではログインできない場合があります
+            </p>
+            <p className="text-xs text-amber-600 mb-3">
+              Safariで一度ログインすれば、次回からホーム画面アプリでも自動ログインされます。
+            </p>
+            <button
+              onClick={() => window.open(window.location.href, "_blank")}
+              className="w-full py-2 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-600 transition-colors"
+            >
+              Safariで開く
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -370,9 +388,7 @@ export default function InvestmentWatchlist() {
   const [notifications, setNotifications] = useState([]);
   const [sortBy, setSortBy] = useState("date");
 
-  // PWAスタンドアロンモードかどうか判定
-  const isPWA = window.matchMedia("(display-mode: standalone)").matches
-    || window.navigator.standalone === true;
+  const [loginError, setLoginError] = useState(false);
 
   // 認証状態の監視
   useEffect(() => {
@@ -382,15 +398,6 @@ export default function InvestmentWatchlist() {
     });
     return unsubscribe;
   }, []);
-
-  // PWAモードでリダイレクトから戻ってきた時の処理
-  useEffect(() => {
-    if (isPWA) {
-      getRedirectResult(auth).catch((err) => {
-        console.error("リダイレクトログインエラー:", err);
-      });
-    }
-  }, [isPWA]);
 
   // Firestore リアルタイム同期
   useEffect(() => {
@@ -409,25 +416,16 @@ export default function InvestmentWatchlist() {
     return unsubscribe;
   }, [user]);
 
-  // ログイン（PWAならリダイレクト、通常ブラウザならポップアップ）
+  // ログイン（常にポップアップ方式）
   const handleLogin = async () => {
     setLoginLoading(true);
+    setLoginError(false);
     try {
       await setPersistence(auth, browserLocalPersistence);
-      if (isPWA) {
-        // PWAモードではポップアップが開けないのでリダイレクト
-        await signInWithRedirect(auth, googleProvider);
-      } else {
-        await signInWithPopup(auth, googleProvider);
-      }
+      await signInWithPopup(auth, googleProvider);
     } catch (err) {
       console.error("ログインエラー:", err);
-      // ポップアップがブロックされた場合もリダイレクトにフォールバック
-      if (err.code === "auth/popup-blocked") {
-        await signInWithRedirect(auth, googleProvider);
-      } else {
-        alert("ログインに失敗しました。もう一度お試しください。");
-      }
+      setLoginError(true);
     } finally {
       setLoginLoading(false);
     }
@@ -539,7 +537,7 @@ export default function InvestmentWatchlist() {
 
   // 未ログイン
   if (!user) {
-    return <LoginScreen onLogin={handleLogin} loading={loginLoading} />;
+    return <LoginScreen onLogin={handleLogin} loading={loginLoading} loginError={loginError} />;
   }
 
   return (
