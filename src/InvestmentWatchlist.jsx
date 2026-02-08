@@ -1,8 +1,23 @@
 import { useState, useEffect, useCallback } from "react";
+import { auth, googleProvider, db } from "./firebase";
+import {
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  onAuthStateChanged,
+  signOut,
+} from "firebase/auth";
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  orderBy,
+} from "firebase/firestore";
 
 // ========== ユーティリティ ==========
-const STORAGE_KEY = "investment-watchlist-data";
-
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
 
 const formatPrice = (price) => {
@@ -21,61 +36,33 @@ const getPriorityColor = (priority) => {
 
 const getPriorityLabel = (p) => ({ high: "高", medium: "中", low: "低" }[p] || "中");
 
-// localStorage ヘルパー
-const loadStocks = () => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    if (data) return JSON.parse(data);
-  } catch (e) {
-    console.error("データの読み込みに失敗:", e);
-  }
-  return null;
-};
-
-const persistStocks = (stocks) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stocks));
-  } catch (e) {
-    console.error("データの保存に失敗:", e);
-  }
-};
-
-// サンプルデータ（初回のみ）
-const SAMPLE_DATA = [
-  {
-    id: "sample1",
-    name: "トヨタ自動車",
-    code: "7203",
-    targetPrice: 2500,
-    currentPrice: 2800,
-    memo: "EV戦略に注目。決算後の下落を待ちたい",
-    priority: "high",
-    addedAt: "2026-01-15T00:00:00.000Z",
-    updatedAt: "2026-02-01T00:00:00.000Z",
-  },
-  {
-    id: "sample2",
-    name: "ソニーグループ",
-    code: "6758",
-    targetPrice: 3200,
-    currentPrice: 3100,
-    memo: "ゲーム・音楽事業が好調。買い時かも",
-    priority: "high",
-    addedAt: "2026-01-20T00:00:00.000Z",
-    updatedAt: "2026-02-05T00:00:00.000Z",
-  },
-  {
-    id: "sample3",
-    name: "任天堂",
-    code: "7974",
-    targetPrice: 8000,
-    currentPrice: 8500,
-    memo: "次世代機の発表待ち",
-    priority: "medium",
-    addedAt: "2026-02-01T00:00:00.000Z",
-    updatedAt: "2026-02-08T00:00:00.000Z",
-  },
-];
+// ========== ログイン画面 ==========
+function LoginScreen({ onLogin, loading }) {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-3xl shadow-xl p-8 max-w-sm w-full text-center">
+        <p className="text-6xl mb-4">📈</p>
+        <h1 className="text-2xl font-black text-gray-800 mb-2">投資ウォッチリスト</h1>
+        <p className="text-gray-400 text-sm mb-8">
+          銘柄を管理して、買い時を逃さない
+        </p>
+        <button
+          onClick={onLogin}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 bg-white border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700 font-bold py-3 px-6 rounded-xl transition-all disabled:opacity-50"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+          </svg>
+          {loading ? "ログイン中..." : "Googleでログイン"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ========== 通知コンポーネント ==========
 function NotificationBanner({ notifications, onDismiss, onDismissAll }) {
@@ -123,7 +110,7 @@ function StockCard({ stock, onEdit, onDelete, onUpdatePrice }) {
     const target = Number(stock.targetPrice);
     const current = Number(stock.currentPrice);
     if (current <= target) return { label: "買い時！", color: "text-green-600", icon: "✅" };
-    const diff = ((current - target) / target * 100).toFixed(1);
+    const diff = (((current - target) / target) * 100).toFixed(1);
     return { label: `目標まで -${diff}%`, color: "text-orange-500", icon: "⏳" };
   })();
 
@@ -192,7 +179,10 @@ function StockCard({ stock, onEdit, onDelete, onUpdatePrice }) {
             </div>
           ) : (
             <button
-              onClick={() => { setCurrentPrice(stock.currentPrice || ""); setIsEditing(true); }}
+              onClick={() => {
+                setCurrentPrice(stock.currentPrice || "");
+                setIsEditing(true);
+              }}
               className="font-bold text-gray-700 hover:text-blue-600 transition-colors cursor-pointer"
             >
               {stock.currentPrice ? formatPrice(stock.currentPrice) : "価格を入力 →"}
@@ -322,11 +312,10 @@ function StockForm({ stock, onSave, onCancel }) {
                 key={p.value}
                 type="button"
                 onClick={() => update("priority", p.value)}
-                className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${
-                  form.priority === p.value
+                className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${form.priority === p.value
                     ? `${p.color} text-white shadow-md scale-105`
                     : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                }`}
+                  }`}
               >
                 {p.label}
               </button>
@@ -365,89 +354,78 @@ function StockForm({ stock, onSave, onCancel }) {
   );
 }
 
-// ========== エクスポート/インポート ==========
-function DataManager({ stocks, onImport }) {
-  const [showMenu, setShowMenu] = useState(false);
-
-  const exportData = () => {
-    const data = JSON.stringify(stocks, null, 2);
-    const blob = new Blob([data], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `watchlist-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowMenu(false);
-  };
-
-  const importData = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json";
-    input.onchange = (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const data = JSON.parse(ev.target.result);
-          if (Array.isArray(data)) onImport(data);
-        } catch {
-          alert("ファイルの読み込みに失敗しました");
-        }
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-    setShowMenu(false);
-  };
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setShowMenu(!showMenu)}
-        className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-        title="データ管理"
-      >
-        ⚙️
-      </button>
-      {showMenu && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
-          <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-40 min-w-40">
-            <button
-              onClick={exportData}
-              className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 text-gray-700"
-            >
-              📤 エクスポート
-            </button>
-            <button
-              onClick={importData}
-              className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 text-gray-700"
-            >
-              📥 インポート
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ========== メインアプリ ==========
 export default function InvestmentWatchlist() {
-  const [stocks, setStocks] = useState(() => {
-    // 初回: localStorageから読み込み、なければサンプルデータ
-    const saved = loadStocks();
-    return saved || SAMPLE_DATA;
-  });
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [stocks, setStocks] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingStock, setEditingStock] = useState(null);
   const [filter, setFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [notifications, setNotifications] = useState([]);
   const [sortBy, setSortBy] = useState("date");
+
+  // 認証状態の監視
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  // リダイレクト結果の処理（スマホ用）
+  useEffect(() => {
+    getRedirectResult(auth).catch((err) => {
+      console.error("リダイレクトログインエラー:", err);
+    });
+  }, []);
+
+  // Firestore リアルタイム同期
+  useEffect(() => {
+    if (!user) {
+      setStocks([]);
+      return;
+    }
+    const stocksRef = collection(db, "users", user.uid, "stocks");
+    const q = query(stocksRef, orderBy("addedAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setStocks(data);
+      // 通知チェック
+      checkNotifications(data);
+    });
+    return unsubscribe;
+  }, [user]);
+
+  // ログイン
+  const handleLogin = async () => {
+    setLoginLoading(true);
+    try {
+      // モバイルではリダイレクト、PCではポップアップ
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
+    } catch (err) {
+      console.error("ログインエラー:", err);
+      // ポップアップがブロックされた場合、リダイレクトにフォールバック
+      if (err.code === "auth/popup-blocked") {
+        await signInWithRedirect(auth, googleProvider);
+      }
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  // ログアウト
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
 
   // 通知チェック
   const checkNotifications = useCallback((stockList) => {
@@ -464,38 +442,40 @@ export default function InvestmentWatchlist() {
     setNotifications(newNotifications);
   }, []);
 
-  // 起動時に通知チェック
-  useEffect(() => {
-    checkNotifications(stocks);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Firestore に保存
+  const saveStock = async (stock) => {
+    if (!user) return;
+    const stockRef = doc(db, "users", user.uid, "stocks", stock.id);
+    const { id, ...data } = stock;
+    await setDoc(stockRef, data);
+  };
 
-  const saveStocks = useCallback((newStocks) => {
-    setStocks(newStocks);
-    persistStocks(newStocks); // localStorage に保存
-    checkNotifications(newStocks);
-  }, [checkNotifications]);
+  // Firestore から削除
+  const removeStock = async (id) => {
+    if (!user) return;
+    await deleteDoc(doc(db, "users", user.uid, "stocks", id));
+  };
 
-  const handleSave = (stock) => {
-    const exists = stocks.find((s) => s.id === stock.id);
-    const newStocks = exists
-      ? stocks.map((s) => (s.id === stock.id ? stock : s))
-      : [...stocks, stock];
-    saveStocks(newStocks);
+  const handleSave = async (stock) => {
+    await saveStock(stock);
     setShowForm(false);
     setEditingStock(null);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm("この銘柄を削除しますか？")) {
-      saveStocks(stocks.filter((s) => s.id !== id));
+      await removeStock(id);
     }
   };
 
-  const handleUpdatePrice = (id, price) => {
-    const newStocks = stocks.map((s) =>
-      s.id === id ? { ...s, currentPrice: price, updatedAt: new Date().toISOString() } : s
-    );
-    saveStocks(newStocks);
+  const handleUpdatePrice = async (id, price) => {
+    const stock = stocks.find((s) => s.id === id);
+    if (!stock) return;
+    await saveStock({
+      ...stock,
+      currentPrice: price,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const handleEdit = (stock) => {
@@ -534,6 +514,23 @@ export default function InvestmentWatchlist() {
     (s) => s.targetPrice && s.currentPrice && s.currentPrice <= s.targetPrice
   ).length;
 
+  // ローディング中
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-4xl mb-3">📈</p>
+          <p className="text-gray-400">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 未ログイン
+  if (!user) {
+    return <LoginScreen onLogin={handleLogin} loading={loginLoading} />;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <NotificationBanner
@@ -560,9 +557,28 @@ export default function InvestmentWatchlist() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <DataManager stocks={stocks} onImport={saveStocks} />
+              {/* ユーザー情報 */}
+              <div className="flex items-center gap-2">
+                {user.photoURL && (
+                  <img
+                    src={user.photoURL}
+                    alt=""
+                    className="w-8 h-8 rounded-full border-2 border-gray-200"
+                  />
+                )}
+                <button
+                  onClick={handleLogout}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                  title="ログアウト"
+                >
+                  ログアウト
+                </button>
+              </div>
               <button
-                onClick={() => { setEditingStock(null); setShowForm(true); }}
+                onClick={() => {
+                  setEditingStock(null);
+                  setShowForm(true);
+                }}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-md hover:shadow-lg transition-all active:scale-95"
               >
                 + 銘柄追加
@@ -591,11 +607,10 @@ export default function InvestmentWatchlist() {
                 <button
                   key={f.value}
                   onClick={() => setFilter(f.value)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    filter === f.value
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filter === f.value
                       ? "bg-gray-800 text-white"
                       : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                  }`}
+                    }`}
                 >
                   {f.label}
                 </button>
@@ -624,7 +639,10 @@ export default function InvestmentWatchlist() {
             </p>
             {stocks.length === 0 && (
               <button
-                onClick={() => { setEditingStock(null); setShowForm(true); }}
+                onClick={() => {
+                  setEditingStock(null);
+                  setShowForm(true);
+                }}
                 className="mt-4 text-blue-600 font-bold hover:underline"
               >
                 最初の銘柄を追加する →
@@ -651,7 +669,10 @@ export default function InvestmentWatchlist() {
         <StockForm
           stock={editingStock}
           onSave={handleSave}
-          onCancel={() => { setShowForm(false); setEditingStock(null); }}
+          onCancel={() => {
+            setShowForm(false);
+            setEditingStock(null);
+          }}
         />
       )}
     </div>
